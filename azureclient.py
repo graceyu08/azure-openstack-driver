@@ -1,7 +1,19 @@
-
+# Copyright 2015 Grace Yu                                                                                                                                            
+# All Rights Reserved.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
 import utils
 
-#from nova.openstack.common import log as logging
 
 from azure.servicemanagement import CaptureRoleAsVMImage
 from azure.servicemanagement import LinuxConfigurationSet
@@ -75,9 +87,7 @@ class AzureServicesManager:
 
         return service_name
 
-    def create_vm(self, service_name, vm_name, image_name, flavor):
-        #image = self._get_azure_image(image_name)
-        image_name='5112500ae3b842c8b9c604889f8753c3__OpenLogic-CentOS-65-20150128'
+    def create_vm(self, service_name, vm_name, image_name, role_size):
         media_link = self._get_media_link(vm_name)
         # Linux VM configuration
         hostname = '-'.join((vm_name, 'host'))
@@ -88,9 +98,6 @@ class AzureServicesManager:
 
         # Hard disk for the OS
         os_hd = OSVirtualHardDisk(image_name, media_link)
-
-        #role_size = self._get_role_size(flavor)
-        role_size = 'Small'
 
         # Create vm
         result = self.sms.create_virtual_machine_deployment(
@@ -225,12 +232,6 @@ class AzureServicesManager:
                                         location=self.location)
 
         return storage_account
-
-    def _get_role_size(self, flavor):
-        pass
-
-    def _get_azure_image(self, image_name):
-        pass
 
     def _wait_for_operation(self, request_id, timeout=3000,
                             failure_callback=None,

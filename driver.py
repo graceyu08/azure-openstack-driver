@@ -36,11 +36,10 @@ from nova.openstack.common import loopingcall
 from nova.virt import driver
 from nova.virt import virtapi
 
-#from credentials import get_nova_creds
-#from instance_rule_refresher import InstanceRuleRefresher
-#from openstack_group_service import OpenstackGroupService
-#from openstack_rule_service import OpenstackRuleService
-#from openstack_rule_transformer import OpenstackRuleTransformer
+
+from mappings import FLAVORS
+from mappings import IMAGES
+
 
 driver_opts = [
     cfg.StrOpt('compute_driver',
@@ -168,7 +167,7 @@ class AzureDriver(driver.ComputeDriver):
         :cpu_time:        (int) the CPU time used in nanoseconds
         """
         cs_name = instance['metadata'].setdefault('cloud_service_name', '')
-        vm_name = instance['display_name']
+        vm_name = instance['metadata']['vm_name']
         if not cs_name:
             raise exception.InstanceNotFound(instance_id=vm_name)
 
@@ -306,9 +305,10 @@ class AzureDriver(driver.ComputeDriver):
         :param block_device_info: Information about block devices to be
                                   attached to the instance.
         """
-        image_name = image_meta.get('name')
         instance_name = instance.display_name
         flavor = instance.get_flavor()
+        role_size = self._get_azure_role_size(flavor)
+        image_name = self._get_image_name(image_meta)
 
         user_name = context.user_name
         service_name = instance['metadata'].setdefault('cloud_service_name',
@@ -317,10 +317,11 @@ class AzureDriver(driver.ComputeDriver):
             service_name = self.azure_sms.create_hosted_service(user_name)
 
         result = self.azure_sms.create_vm(service_name, instance_name,
-                                          image_name, flavor)
+                                          image_name, role_size)
 
         instance['metadata'].update(
             {'cloud_service_name': service_name,
+             'vm_name': instance_name,
              'media_link': result['media_link']}
         )
 
@@ -331,6 +332,7 @@ class AzureDriver(driver.ComputeDriver):
 
             state = AZURE_POWER_STATE[vm_info['power_state']]
             status = vm_info['instance_status']
+
             if state == power_state.RUNNING and status == 'ReadyRole':
                 LOG.info("Instance '%s' spawned successfully" % instance_name)
                 raise loopingcall.LoopingCallDone()
@@ -370,7 +372,7 @@ class AzureDriver(driver.ComputeDriver):
             if AZURE_POWER_STATE[state] == power_state.SHUTDOWN:
                 raise loopingcall.LoopingCallDone()
 
-        vm_name = instance.display_name
+        vm_name = instance['metadata']['vm_name']
         cl_name = instance['metadata']['cloud_service_name']
 
         try:
@@ -421,7 +423,7 @@ class AzureDriver(driver.ComputeDriver):
             encountered
         """
         cl_name = instance['metadata'].setdefault('cloud_service_name', '')
-        vm_name = instance['display_name']
+        vm_name = instance['metadata']['vm_name']
         if not cl_name:
             raise exception.InstanceNotFound(instance=vm_name)
 
@@ -510,7 +512,7 @@ class AzureDriver(driver.ComputeDriver):
     def attach_volume(self, context, connection_info, instance, mountpoint,
                       disk_bus=None, device_type=None, encryption=None):
         """Attach the disk to the instance at mountpoint using info."""
-        vm_name = instance['name']
+        vm_name = instance['metadata']['vm_name']
         if vm_name not in self._mounts:
             self._mounts[vm_name] = {}
 
@@ -527,7 +529,7 @@ class AzureDriver(driver.ComputeDriver):
     def detach_volume(self, connection_info, instance, mountpoint,
                       encryption=None):
         """Detach the disk attached to the instance."""
-        vm_name = instance['name']
+        vm_name = instance['metadata']['vm_name']
         service_name = instance['metadata']['cloud_service_name']
 
         try:
@@ -554,7 +556,7 @@ class AzureDriver(driver.ComputeDriver):
 
         :param instance: nova.objects.instance.Instance
         """
-        vm_name = instance['name']
+        vm_name = instance['metadata']['vm_name']
         if vif['id'] in self._interfaces:
             raise exception.InterfaceAttachFailed(
                 'Trying to attach duplicated interface for instance' % vm_name
@@ -592,7 +594,7 @@ class AzureDriver(driver.ComputeDriver):
         """
         update_task_state(task_state=task_states.IMAGE_PENDING_UPLOAD)
         service_name = instance['metadata']['cloud_service_name']
-        vm_name = instance['name']
+        vm_name = instance['metadata']['vm_name']
         vm_info = self.azure_sms.get_vm_info(service_name, vm_name)
         if not vm_info:
             raise exception.InstanceNotFound("Cannot find instance %s" % vm_name)
@@ -743,7 +745,7 @@ class AzureDriver(driver.ComputeDriver):
         :param instance: nova.objects.instance.Instance
         """
         service_name = instance['metadata']['cloud_service_name']
-        vm_name = instance['name']
+        vm_name = instance['metadata']['vm_name']
         self.azure_sms.power_off(service_name, vm_name)
 
     def power_on(self, context, instance, network_info,
@@ -753,7 +755,7 @@ class AzureDriver(driver.ComputeDriver):
         :param instance: nova.objects.instance.Instance
         """
         service_name = instance['metadata']['cloud_service_name']
-        vm_name = instance['name']
+        vm_name = instance['metadata']['vm_name']
         self.azure_sms.power_on(service_name, vm_name)
 
     def soft_delete(self, instance):
@@ -1482,5 +1484,17 @@ class AzureDriver(driver.ComputeDriver):
         #raise NotImplementedError()
         pass
 
+    def _get_azure_role_size(self, flavor):
+        name = flavor.name
+        if name not in FLAVORS:
+            raise exception.FlavorNotFoundByName(flavor_name=name)
 
+        return FLAVORS[name]
 
+    def _get_image_name(self, image_meta):
+        name = image_meta.get('name')
+        image_id = image_meta.get('id')
+        if name not in IMAGES:
+            raise exception.ImageNotFound(image_id=image_id)
+
+        return IMAGES[name]
