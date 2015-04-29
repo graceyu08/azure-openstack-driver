@@ -17,7 +17,7 @@ other OpenStack versions.
 1. `# cd <openstack_installation_dir>/nova/virt`
 2. `# git clone https://github.com/graceyu08/azure-openstack-driver.git azure`
 3. `# vi /etc/nova/nova.conf`
-
+       ```
        [DEFAULT]
        compute_driver=nova.virt.azure.AzureDriver
 
@@ -27,5 +27,6 @@ other OpenStack versions.
        [azuredriver]
        subscription_id=<your-subscriptionId>
        cert_file=<path-of-certificate-file>
-
-4. Restart compute service.
+       ```
+4. Edit `mappings.py` as optional, which maps OpenStack flavor/image to Azure roleSize/image
+5. Restart compute service
