@@ -17,6 +17,14 @@ __author__ = 'graceyu'
 import string
 import random
 
+
+from azure import WindowsAzureMissingResourceError
+from nova.openstack.common import log as logging
+
+
+LOG = logging.getLogger(__name__)
+
+
 def generate_random_name(length, prefix=None,
                          chars=string.ascii_lowercase+string.digits):
     string =  ''.join(random.choice(chars) for _ in range(length))
@@ -24,3 +32,14 @@ def generate_random_name(length, prefix=None,
         string = '-'.join((prefix, string))
 
     return string
+
+
+def resource_not_found_handler(func):
+    def inner(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except WindowsAzureMissingResourceError:
+            LOG.warning("******Cannot find Azure Resources********************")
+            return None
+
+    return inner

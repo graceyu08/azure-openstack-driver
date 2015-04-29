@@ -19,6 +19,10 @@ from azure.servicemanagement import CaptureRoleAsVMImage
 from azure.servicemanagement import LinuxConfigurationSet
 from azure.servicemanagement import OSVirtualHardDisk
 from azure.servicemanagement import ServiceManagementService
+from nova.openstack.common import log as logging
+
+
+LOG = logging.getLogger(__name__)
 
 # Storage
 CONTAINER = 'os-image'
@@ -60,6 +64,12 @@ class AzureServicesManager:
     def list_images(self):
         return self.sms.list_os_images()
 
+    @utils.resource_not_found_handler
+    def get_hosted_service(self, service_name):
+        resp = self.sms.get_hosted_service_properties(service_name)
+        properties = resp.hosted_service_properties
+        return properties.__dict__
+
     def delete_hosted_service(self, service_name):
         res = self.sms.check_hosted_service_name_availability(service_name)
         if not res.result:
@@ -87,7 +97,7 @@ class AzureServicesManager:
 
         return service_name
 
-    def create_vm(self, service_name, vm_name, image_name, role_size):
+    def create_virtual_machine(self, service_name, vm_name, image_name, role_size):
         media_link = self._get_media_link(vm_name)
         # Linux VM configuration
         hostname = '-'.join((vm_name, 'host'))
@@ -108,14 +118,13 @@ class AzureServicesManager:
             role_size=role_size
         )
         request_id = result.request_id
-        #self.sms.wait_for_operation_status(request_id, timeout=3000)
 
         return {
             'request_id': request_id,
             'media_link': media_link
         }
 
-    def delete_vm(self, service_name, vm_name):
+    def delete_virtual_machine(self, service_name, vm_name):
         resp = self.sms.delete_deployment(service_name, vm_name, True)
         self.sms.wait_for_operation_status(resp.request_id)
         result = self.sms.delete_hosted_service(service_name)
@@ -127,15 +136,17 @@ class AzureServicesManager:
 
         return '-'.join((os_user, utils.generate_random_name(6)))
 
-    def get_vm_info(self, service_name, vm_name):
+    @utils.resource_not_found_handler
+    def get_virtual_machine_info(self, service_name, vm_name):
         vm_info = {}
         deploy_info = self.sms.get_deployment_by_name(service_name, vm_name)
+
         if deploy_info and deploy_info.role_instance_list:
             vm_info = deploy_info.role_instance_list[0].__dict__
 
         return vm_info
 
-    def list_vms(self):
+    def list_virtual_machines(self):
         vm_list = []
         services = self.sms.list_hosted_services()
         for service in services:

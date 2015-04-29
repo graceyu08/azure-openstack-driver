@@ -69,10 +69,14 @@ driver_opts = [
                     'vif_plugging_is_fatal). If this is set to zero and '
                     'vif_plugging_is_fatal is False, events should not '
                     'be expected to arrive at all.'),
+    cfg.StrOpt('subscription_id',
+               help='Azure subscription ID'),
+    cfg.StrOpt('cert_file',
+               help='Auzre certification file path'),
 ]
 
 CONF = cfg.CONF
-CONF.register_opts(driver_opts, 'azure_driver')
+CONF.register_opts(driver_opts, 'azuredriver')
 CONF.import_opt('my_ip', 'nova.netconf')
 LOG = logging.getLogger(__name__)
 
@@ -168,11 +172,15 @@ class AzureDriver(driver.ComputeDriver):
         """
         cs_name = instance['metadata'].setdefault('cloud_service_name', '')
         vm_name = instance['metadata']['vm_name']
+        LOG.debug("***** Cloud Service Name is '%s' *********" % cs_name)
+        LOG.debug("***** Virtual Machine Name is '%s' ********" % vm_name)
+
         if not cs_name:
             raise exception.InstanceNotFound(instance_id=vm_name)
 
-        LOG.debug("****Cloud Service Name is '%s' *********" % cs_name)
-        vm_info = self.azure_sms.get_vm_info(cs_name, vm_name)
+        vm_info = self.azure_sms.get_virtual_machine_info(cs_name, vm_name)
+        LOG.debug("**** vm info is '%s' *********" % vm_info)
+
         state = AZURE_POWER_STATE[vm_info['power_state']]
 
         return {
@@ -231,7 +239,7 @@ class AzureDriver(driver.ComputeDriver):
         """Return the names of all the instances known to the virtualization
         layer, as a list.
         """
-        return self.azure_sms.list_vms()
+        return self.azure_sms.list_virtual_machines()
 
     def list_instance_uuids(self):
         """Return the UUIDS of all the instances known to the virtualization
@@ -305,6 +313,7 @@ class AzureDriver(driver.ComputeDriver):
         :param block_device_info: Information about block devices to be
                                   attached to the instance.
         """
+        LOG.info("******Start Spawning***********************")
         instance_name = instance.display_name
         flavor = instance.get_flavor()
         role_size = self._get_azure_role_size(flavor)
@@ -313,22 +322,29 @@ class AzureDriver(driver.ComputeDriver):
         user_name = context.user_name
         service_name = instance['metadata'].setdefault('cloud_service_name',
                                                        None)
+
         if not service_name:
             service_name = self.azure_sms.create_hosted_service(user_name)
 
-        result = self.azure_sms.create_vm(service_name, instance_name,
-                                          image_name, role_size)
+        LOG.debug("***Spawning-->Cloud Service Name: '%s' ***" % service_name)
 
+        result = self.azure_sms.create_virtual_machine(service_name,
+                                                       instance_name,
+                                                       image_name,
+                                                       role_size)
+        LOG.info("*** Creating virtual machine--> '%s' ****" % instance_name)
         instance['metadata'].update(
-            {'cloud_service_name': service_name,
-             'vm_name': instance_name,
-             'media_link': result['media_link']}
+            {
+                'cloud_service_name': service_name,
+                'vm_name': instance_name,
+                'media_link': result['media_link']
+            }
         )
 
         def _wait_for_boot(service_name, instance_name):
-            vm_info = self.azure_sms.get_vm_info(service_name, instance_name)
+            vm_info = self.azure_sms.get_virtual_machine_info(service_name, instance_name)
             while not vm_info:
-                vm_info = self.azure_sms.get_vm_info(service_name, instance_name)
+                vm_info = self.azure_sms.get_virtual_machine_info(service_name, instance_name)
 
             state = AZURE_POWER_STATE[vm_info['power_state']]
             status = vm_info['instance_status']
@@ -359,27 +375,27 @@ class AzureDriver(driver.ComputeDriver):
         :param destroy_disks: Indicates if disks should be destroyed
         """
         LOG.info(" ******* Calling destroy *******")
+        LOG.debug("****** Instance metadata--> %s" % instance['metadata'])
+
         if 'cloud_service_name' not in instance['metadata']:
             LOG.warning("Cannot find Azure instance for '%s'" % instance['name'])
             return
 
-        def _wait_for_destroy(service_name, vm_name):
-            vm_info = self.azure_sms.get_vm_info(service_name, vm_name)
-            if not vm_info:
+        def _wait_for_destroy(service_name):
+            service_info = self.azure_sms.get_hosted_service(service_name)
+            if not service_info:
                 raise loopingcall.LoopingCallDone()
 
-            state = vm_info['power_state']
-            if AZURE_POWER_STATE[state] == power_state.SHUTDOWN:
+            if service_info['status'] == 'Deleted':
                 raise loopingcall.LoopingCallDone()
 
         vm_name = instance['metadata']['vm_name']
         cl_name = instance['metadata']['cloud_service_name']
 
         try:
-            self.azure_sms.delete_vm(cl_name, vm_name)
+            self.azure_sms.delete_virtual_machine(cl_name, vm_name)
             timer = loopingcall.FixedIntervalLoopingCall(_wait_for_destroy,
-                                                         cl_name,
-                                                         vm_name)
+                                                         cl_name)
             timer.start(interval=0.5).wait()
         except:
             LOG.info('cannot find instance in Azure')
@@ -595,7 +611,7 @@ class AzureDriver(driver.ComputeDriver):
         update_task_state(task_state=task_states.IMAGE_PENDING_UPLOAD)
         service_name = instance['metadata']['cloud_service_name']
         vm_name = instance['metadata']['vm_name']
-        vm_info = self.azure_sms.get_vm_info(service_name, vm_name)
+        vm_info = self.azure_sms.get_virtual_machine_info(service_name, vm_name)
         if not vm_info:
             raise exception.InstanceNotFound("Cannot find instance %s" % vm_name)
 
