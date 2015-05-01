@@ -20,6 +20,8 @@ Driver for Azure platform:
 import os
 import sys
 
+
+import utils as azure_utils
 from azureclient import AzureServicesManager
 from novaclient.v1_1 import client
 from oslo.config import cfg
@@ -608,26 +610,24 @@ class AzureDriver(driver.ComputeDriver):
         :param image_id: Reference to a pre-created image that will
                          hold the snapshot.
         """
-        update_task_state(task_state=task_states.IMAGE_PENDING_UPLOAD)
         service_name = instance['metadata']['cloud_service_name']
         vm_name = instance['metadata']['vm_name']
         vm_info = self.azure_sms.get_virtual_machine_info(service_name, vm_name)
         if not vm_info:
             raise exception.InstanceNotFound("Cannot find instance %s" % vm_name)
 
-        self.azure_sms.snapshot(service_name, vm_name, image_id)
-        update_task_state(task_state=task_states.IMAGE_UPLOADING,
-                          expected_state=task_states.IMAGE_SNAPSHOT)
-
         image_service = glance.get_default_image_service()
+
         snapshot = image_service.show(context, image_id)
-        snapshot_name = snapshot['name']
+        LOG.debug("**** Snapshot info--> %s" % snapshot)
+        snapshot_name = azure_utils.generate_random_name(5, snapshot['name'])
         image_url = glance.generate_image_url(image_id)
+        LOG.debug("**** image url--> '%s' ****" % image_url)
 
         image_metadata = {
             'is_public': False,
             'status': 'active',
-            'name': '-'.join((vm_name, snapshot_name)),
+            'name': '-'.join(('azure', snapshot_name)),
             'properties': {
                 'kernel_id': instance['kernel_id'],
                 'image_location': 'snapshot',
@@ -639,7 +639,11 @@ class AzureDriver(driver.ComputeDriver):
         if instance['os_type']:
             image_metadata['properties']['os_type'] = instance['os_type']
 
-        image_service.update(context, image_id, image_metadata)
+        update_task_state(task_state=task_states.IMAGE_UPLOADING,
+                          expected_state=task_states.IMAGE_SNAPSHOT)
+
+        self.azure_sms.snapshot(service_name, vm_name, image_id, snapshot_name)
+        image_service.update(context, image_id, image_metadata, "fake image data")
 
     def finish_migration(self, context, migration, instance, disk_info,
                          network_info, image_meta, resize_instance,

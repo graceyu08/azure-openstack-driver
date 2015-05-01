@@ -204,10 +204,11 @@ class AzureServicesManager:
 
         return None
 
-    def snapshot(self, service_name, vm_name, image_id):
+    def snapshot(self, service_name, vm_name, image_id, snanshot_name):
         image_desc = 'Snapshot for image %s' % vm_name
-        image = CaptureRoleAsVMImage('Specialized', image_id, image_id,
-                                     image_desc, 'english')
+        image = CaptureRoleAsVMImage('Specialized', snanshot_name,
+                                     image_id, image_desc, 'english')
+
         resp = self.sms.capture_vm_image(service_name, vm_name, vm_name, image)
 
         self.sms.wait_for_operation_status(resp.request_id)
